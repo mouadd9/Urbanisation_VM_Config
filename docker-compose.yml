@@ -70,6 +70,71 @@ services:
       retries: 5
 
 
+# --- 3. LE SERVICE D'AUTHENTIFICATION ---
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak
+    ports:
+      # Expose le port 8080 de Keycloak sur le port 8080 de la VM hôte
+      # C'est ici que vous accéderez à la console d'admin et à la page de login
+      - "8080:8080"
+    networks:
+      - services-net
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: password 
+
+      # --- Connexion à la Base de Données (PostgreSQL) ---
+      # Dit à Keycloak d'utiliser 'postgres'
+      KC_DB: postgres
+      # Le nom du service 'db' sur le réseau docker-compose
+      KC_DB_URL_HOST: db
+      # Le nom de la base de données que Keycloak va créer et utiliser
+      KC_DB_DATABASE: keycloak_db
+      # L'utilisateur pour se connecter à PostgreSQL
+      KC_DB_USERNAME: guacamole_user
+      # Le mot de passe pour cet utilisateur (doit correspondre à celui du service 'db')
+      KC_DB_PASSWORD: password 
+      KC_SCHEMA: public
+
+      # --- Configuration Réseau Cruciale ---
+      # L'adresse publique que les navigateurs utiliseront pour joindre Keycloak.
+      # C'est VITAL pour OIDC. Remplacez par l'IP de votre VM.
+      KC_HOSTNAME: 192.168.100.5:8080 # <--- CHANGEZ CECI (IP:PORT)
+      
+      # (Optionnel) Permet de démarrer en HTTP pour le développement
+      KC_HTTP_ENABLED: 'true'
+      KC_PROXY: 'edge'
+    depends_on:
+      # Dit à Docker d'attendre avant de démarrer Keycloak
+      db:
+        condition: service_healthy
+      ldap:
+        condition: service_healthy
+
+    # =======================================================================
+    # RÔLE DE CE CONTENEUR :
+    # Ce conteneur ('keycloak') est le serveur central d'authentification (IdP).
+    # Son rôle est de fournir une page de connexion unique (SSO) pour toutes
+    # vos applications (Guacamole, Proxmox). Il gère le protocole OIDC.
+    #
+    # CONNEXIONS AVEC D'AUTRES SERVICES :
+    #
+    # - 'db' (Connexion sortante) :
+    #   Keycloak se connecte à 'db' pour écrire et lire sa propre configuration
+    #   (realms, clients OIDC, secrets, etc.) dans la base 'keycloak_db'.
+    #
+    # - 'ldap' (Connexion sortante) :
+    #   Keycloak se connecte à 'ldap' (via la "User Federation" que vous
+    #   configurerez manuellement) pour LIRE les utilisateurs et les groupes,
+    #   et pour VÉRIFIER les mots de passe.
+    #
+    # - 'guacamole-webapp' (Connexion entrante) :
+    #   Le service 'guacamole-webapp' n'est pas encore défini, mais il
+    #   redirigera les navigateurs des utilisateurs vers ce conteneur
+    #   Keycloak pour qu'ils puissent s'authentifier.
+    # =======================================================================
+
 
 # Définition des volumes pour la persistance des données
 volumes:
