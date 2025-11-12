@@ -1,1 +1,44 @@
-# test
+# Définition de la version de Docker Compose
+version: '3.8'
+
+services:
+  # =======================================================================
+    # RÔLE DE CE CONTENEUR :
+    # Ce conteneur ('db') est le serveur de base de données PostgreSQL.
+    # Son unique rôle est de stocker les données de configuration (Guacamole et Keycloak).
+  
+    # CONNEXIONS AVEC D'AUTRES SERVICES :
+    # Ce service n'initie aucune connexion. Il attend les connexions entrantes.
+    #
+    # - 'guacamole-webapp' (Connexion entrante) :
+    #   'guacamole-webapp' se connecte à ce conteneur pour lire et écrire la
+    #   liste des connexions RDP et leurs permissions (dans la BD 'guacamole_db').
+    #
+    # - 'keycloak' (Connexion entrante) :
+    #   'keycloak' se connecte aussi à ce conteneur (avec le même utilisateur).
+    #   Keycloak va automatiquement créer et gérer sa PROPRE base de
+    #   données (ex: 'keycloak_db') à l'intérieur de ce service pour
+    #   stocker ses realms, clients, etc.
+    # =======================================================================
+  db:
+    image: postgres:15
+    container_name: db_postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - services-net
+    environment:
+      POSTGRES_USER: guacamole_user
+      POSTGRES_PASSWORD: password 
+      POSTGRES_DB: guacamole_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guacamole_user -d guacamole_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+    
+    
+# Définition des volumes pour la persistance des données
+volumes:
+  db-data:
