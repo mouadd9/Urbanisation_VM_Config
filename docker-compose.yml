@@ -136,6 +136,38 @@ services:
     # =======================================================================
 
 
+# --- 4. LE MOTEUR RDP (Back-end Guacamole) ---
+
+     # =======================================================================
+    # RÔLE DE CE CONTENEUR :
+    # Ce conteneur ('guacd') est le moteur back-end de Guacamole.
+    # Son unique rôle est d'agir comme un traducteur : il parle les protocoles
+    # de bureau à distance natifs (RDP, VNC) et les traduit en protocole
+    # Guacamole pour le 'guacamole-webapp'. Il est invisible pour l'utilisateur.
+    #
+    # CONNEXIONS AVEC D'AUTRES SERVICES :
+    #
+    # - 'guacamole-webapp' (Connexion entrante) :
+    #   Le service 'guacamole-webapp' (que nous ajouterons ensuite) se
+    #   connectera à 'guacd' (sur le port 4822 interne) pour lui
+    #   donner l'ordre de démarrer une session RDP vers une VM cible.
+    #
+    # - VM "Ressources" (Connexion sortante) :
+    #   Ce conteneur initiera des connexions RDP/VNC sortantes vers vos
+    #   autres VMs (ex: 'Ressources-FiliereA') sur le réseau de l'école.
+    # =======================================================================
+  guacd:
+    # Utilise l'image officielle de guacd (le daemon Guacamole)
+    # Il est crucial d'utiliser la MÊME version que le 'guacamole-webapp'
+    image: guacamole/guacd:1.5.3
+    container_name: guacd
+    networks:
+      # Le connecte au réseau partagé 'services-net'
+      - services-net
+    # Note: Pas de 'ports' exposés au public. Seul 'guacamole-webapp'
+
+
+ 
 # Définition des volumes pour la persistance des données
 volumes:
   db-data:
