@@ -37,8 +37,42 @@ services:
       timeout: 5s
       retries: 5
 
-    
-    
+# --- 2. LE SERVICE D'ANNUAIRE ---
+    # =======================================================================
+    # RÔLE DE CE CONTENEUR :
+    # Ce conteneur ('ldap') est le serveur d'annuaire OpenLDAP.
+    # Son unique rôle est de stocker et de gérer les informations d'identité :
+    # les utilisateurs (ex: 'etudiant1'), les mots de passe, et les groupes
+    # (ex: 'groupFiliereA'). C'est la "source de vérité" pour qui est qui.
+    #
+    # CONNEXIONS AVEC D'AUTRES SERVICES :
+    # Ce service attend
+  ldap:
+    image: osixia/openldap:1.5.0
+    container_name: openldap
+    volumes:
+      # Volume de l'annuaire (utilisateurs, groupes)
+      - ldap-data:/var/lib/ldap
+      # RColume pour la configuration d'OpenLDAP 
+      - ldap-config:/etc/ldap/slapd.d
+    networks:
+      - services-net
+    environment:
+      # Définit le domaine de base pour votre annuaire.
+      # 'dc=ensate,dc=local' sera votre "Base DN"
+      LDAP_DOMAIN: ensate.local # ??? 
+      # Définit le mot de passe pour l'administrateur LDAP (ex: cn=admin,dc=ensate,dc=local)
+      LDAP_ADMIN_PASSWORD: password
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-b", "dc=ensate,dc=local", "-H", "ldap://localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+
 # Définition des volumes pour la persistance des données
 volumes:
   db-data:
+  ldap-data:
+  ldap-config:
