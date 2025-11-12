@@ -166,6 +166,74 @@ services:
       - services-net
     # Note: Pas de 'ports' exposés au public. Seul 'guacamole-webapp'
 
+# --- 5. LE PORTAIL WEB (Front-end Guacamole) ---
+    # =======================================================================
+    # RÔLE DE CE CONTENEUR :
+    # Ce conteneur ('guacamole-webapp') est le portail web front-end.
+    # C'est le SEUL service que l'étudiant final voit. Son rôle est de :
+    # 1. Gérer l'authentification (il redirigera vers Keycloak).
+    # 2. Lire les permissions depuis 'db'.
+    # 3. Afficher la liste des connexions RDP autorisées.
+    # 4. Relayer le flux RDP de 'guacd' vers le navigateur.
+    #
+    # CONNEXIONS AVEC D'AUTRES SERVICES :
+    #
+    # - 'keycloak' (Connexion sortante, via redirection) :
+    #   Quand un utilisateur arrive, ce service le redirige vers 'keycloak'
+    #   pour le login OIDC.
+    #
+    # - 'db' (Connexion sortante) :
+    #   Il se connecte à 'db' pour lire la liste des connexions RDP et les
+    #   permissions associées.
+    #
+    # - 'guacd' (Connexion sortante) :
+    #   Une fois que l'utilisateur clique sur une connexion, ce service
+    #   contacte 'guacd' pour lui ordonner de démarrer la session RDP.
+    # =======================================================================
+
+  # Définit un service (conteneur) nommé 'guacamole-webapp'
+  guacamole-webapp:
+    # Utilise l'image officielle de l'application web Guacamole
+    # DOIT correspondre à la version de guacd (1.5.3)
+    image: guacamole/guacamole:1.5.3
+    container_name: guacamole_webapp
+    ports:
+      # Expose le port 8080 du conteneur sur le port 8081 de la VM hôte
+      # (On utilise 8081 pour éviter le conflit avec Keycloak sur 8080)
+      # L'étudiant ira sur http://<IP-VM>:8081
+      - "8081:8080"
+    networks:
+      - services-net
+    environment:
+      # --- Connexion au moteur Guacd ---
+      # Dit au webapp où trouver le service 'guacd'
+      GUACD_HOSTNAME: guacd
+      # Dit au webapp sur quel port 'guacd' écoute (par défaut 4822)
+      GUACD_PORT: 4822
+
+      # --- Connexion à la Base de Données (PostgreSQL) ---
+      # Dit au webapp d'utiliser 'postgresql'
+      GUACAMOLE_JDBC_DRIVER: postgresql
+      # Le nom du service 'db' sur le réseau
+      POSTGRES_HOSTNAME: db
+      # Le port PostgreSQL (par défaut 5432)
+      POSTGRES_PORT: 5432
+      # La base de données spécifique que Guacamole doit utiliser
+      POSTGRES_DATABASE: guacamole_db
+      # L'utilisateur pour se connecter
+      POSTGRES_USER: guacamole_user
+      # Le mot de passe (doit correspondre à celui du service 'db')
+      POSTGRES_PASSWORD: password
+    depends_on:
+      # Attend que ces services soient prêts avant de démarrer
+      db:
+        condition: service_healthy # Attend que la DB soit saine
+      guacd:
+        condition: service_started # Attend juste que guacd ait démarré
+
+networks:
+  services-net:
+    driver: bridge
 
  
 # Définition des volumes pour la persistance des données
