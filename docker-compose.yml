@@ -1,243 +1,100 @@
-# Définition de la version de Docker Compose
 version: '3.8'
 
 services:
-  # =======================================================================
-    # RÔLE DE CE CONTENEUR :
-    # Ce conteneur ('db') est le serveur de base de données PostgreSQL.
-    # Son unique rôle est de stocker les données de configuration (Guacamole et Keycloak).
-  
-    # CONNEXIONS AVEC D'AUTRES SERVICES :
-    # Ce service n'initie aucune connexion. Il attend les connexions entrantes.
-    #
-    # - 'guacamole-webapp' (Connexion entrante) :
-    #   'guacamole-webapp' se connecte à ce conteneur pour lire et écrire la
-    #   liste des connexions RDP et leurs permissions (dans la BD 'guacamole_db').
-    #
-    # - 'keycloak' (Connexion entrante) :
-    #   'keycloak' se connecte aussi à ce conteneur (avec le même utilisateur).
-    #   Keycloak va automatiquement créer et gérer sa PROPRE base de
-    #   données (ex: 'keycloak_db') à l'intérieur de ce service pour
-    #   stocker ses realms, clients, etc.
-    # =======================================================================
-  db:
-    image: postgres:15
-    container_name: db_postgres
-    volumes:
-      - db-data:/var/lib/postgresql/data
-    networks:
-      - services-net
-    environment:
-      POSTGRES_USER: guacamole_user
-      POSTGRES_PASSWORD: password 
-      POSTGRES_DB: guacamole_db
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U guacamole_user -d guacamole_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-# --- 2. LE SERVICE D'ANNUAIRE ---
-    # =======================================================================
-    # RÔLE DE CE CONTENEUR :
-    # Ce conteneur ('ldap') est le serveur d'annuaire OpenLDAP.
-    # Son unique rôle est de stocker et de gérer les informations d'identité :
-    # les utilisateurs (ex: 'etudiant1'), les mots de passe, et les groupes
-    # (ex: 'groupFiliereA'). C'est la "source de vérité" pour qui est qui.
-    #
-    # CONNEXIONS AVEC D'AUTRES SERVICES :
-    # Ce service attend
-  ldap:
+  ############################
+  # OpenLDAP + phpLDAPadmin
+  ############################
+  openldap:
     image: osixia/openldap:1.5.0
     container_name: openldap
-    volumes:
-      # Volume de l'annuaire (utilisateurs, groupes)
-      - ldap-data:/var/lib/ldap
-      # RColume pour la configuration d'OpenLDAP 
-      - ldap-config:/etc/ldap/slapd.d
-    networks:
-      - services-net
     environment:
-      # Définit le domaine de base pour votre annuaire.
-      # 'dc=ensate,dc=local' sera votre "Base DN"
-      LDAP_DOMAIN: ensate.local # ??? 
-      # Définit le mot de passe pour l'administrateur LDAP (ex: cn=admin,dc=ensate,dc=local)
-      LDAP_ADMIN_PASSWORD: password
-    healthcheck:
-      test: ["CMD", "ldapsearch", "-x", "-b", "dc=ensate,dc=local", "-H", "ldap://localhost"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-
-# --- 3. LE SERVICE D'AUTHENTIFICATION ---
-  keycloak:
-    image: quay.io/keycloak/keycloak:latest
-    container_name: keycloak
+      LDAP_ORGANISATION: "ENSA"
+      LDAP_DOMAIN: "ensa.local"
+      LDAP_ADMIN_PASSWORD: admin
     ports:
-      # Expose le port 8080 de Keycloak sur le port 8080 de la VM hôte
-      # C'est ici que vous accéderez à la console d'admin et à la page de login
-      - "8080:8080"
-    networks:
-      - services-net
+      - "389:389"
+      - "636:636"
+
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    container_name: phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+    ports:
+      - "6443:443"
+    depends_on:
+      - openldap
+
+  ############################
+  # Keycloak (with LDAP sync)
+  ############################
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: keycloak
+    command:
+      - start-dev
     environment:
       KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: password 
-
-      # --- Connexion à la Base de Données (PostgreSQL) ---
-      # Dit à Keycloak d'utiliser 'postgres'
-      KC_DB: postgres
-      # Le nom du service 'db' sur le réseau docker-compose
-      KC_DB_URL_HOST: db
-      # Le nom de la base de données que Keycloak va créer et utiliser
-      KC_DB_DATABASE: keycloak_db
-      # L'utilisateur pour se connecter à PostgreSQL
-      KC_DB_USERNAME: guacamole_user
-      # Le mot de passe pour cet utilisateur (doit correspondre à celui du service 'db')
-      KC_DB_PASSWORD: password 
-      KC_SCHEMA: public
-
-      # --- Configuration Réseau Cruciale ---
-      # L'adresse publique que les navigateurs utiliseront pour joindre Keycloak.
-      # C'est VITAL pour OIDC. Remplacez par l'IP de votre VM.
-      KC_HOSTNAME: 192.168.100.5:8080 # <--- CHANGEZ CECI (IP:PORT)
-      
-      # (Optionnel) Permet de démarrer en HTTP pour le développement
-      KC_HTTP_ENABLED: 'true'
-      KC_PROXY: 'edge'
-    depends_on:
-      # Dit à Docker d'attendre avant de démarrer Keycloak
-      db:
-        condition: service_healthy
-      ldap:
-        condition: service_healthy
-
-    # =======================================================================
-    # RÔLE DE CE CONTENEUR :
-    # Ce conteneur ('keycloak') est le serveur central d'authentification (IdP).
-    # Son rôle est de fournir une page de connexion unique (SSO) pour toutes
-    # vos applications (Guacamole, Proxmox). Il gère le protocole OIDC.
-    #
-    # CONNEXIONS AVEC D'AUTRES SERVICES :
-    #
-    # - 'db' (Connexion sortante) :
-    #   Keycloak se connecte à 'db' pour écrire et lire sa propre configuration
-    #   (realms, clients OIDC, secrets, etc.) dans la base 'keycloak_db'.
-    #
-    # - 'ldap' (Connexion sortante) :
-    #   Keycloak se connecte à 'ldap' (via la "User Federation" que vous
-    #   configurerez manuellement) pour LIRE les utilisateurs et les groupes,
-    #   et pour VÉRIFIER les mots de passe.
-    #
-    # - 'guacamole-webapp' (Connexion entrante) :
-    #   Le service 'guacamole-webapp' n'est pas encore défini, mais il
-    #   redirigera les navigateurs des utilisateurs vers ce conteneur
-    #   Keycloak pour qu'ils puissent s'authentifier.
-    # =======================================================================
-
-
-# --- 4. LE MOTEUR RDP (Back-end Guacamole) ---
-
-     # =======================================================================
-    # RÔLE DE CE CONTENEUR :
-    # Ce conteneur ('guacd') est le moteur back-end de Guacamole.
-    # Son unique rôle est d'agir comme un traducteur : il parle les protocoles
-    # de bureau à distance natifs (RDP, VNC) et les traduit en protocole
-    # Guacamole pour le 'guacamole-webapp'. Il est invisible pour l'utilisateur.
-    #
-    # CONNEXIONS AVEC D'AUTRES SERVICES :
-    #
-    # - 'guacamole-webapp' (Connexion entrante) :
-    #   Le service 'guacamole-webapp' (que nous ajouterons ensuite) se
-    #   connectera à 'guacd' (sur le port 4822 interne) pour lui
-    #   donner l'ordre de démarrer une session RDP vers une VM cible.
-    #
-    # - VM "Ressources" (Connexion sortante) :
-    #   Ce conteneur initiera des connexions RDP/VNC sortantes vers vos
-    #   autres VMs (ex: 'Ressources-FiliereA') sur le réseau de l'école.
-    # =======================================================================
-  guacd:
-    # Utilise l'image officielle de guacd (le daemon Guacamole)
-    # Il est crucial d'utiliser la MÊME version que le 'guacamole-webapp'
-    image: guacamole/guacd:1.5.3
-    container_name: guacd
-    networks:
-      # Le connecte au réseau partagé 'services-net'
-      - services-net
-    # Note: Pas de 'ports' exposés au public. Seul 'guacamole-webapp'
-
-# --- 5. LE PORTAIL WEB (Front-end Guacamole) ---
-    # =======================================================================
-    # RÔLE DE CE CONTENEUR :
-    # Ce conteneur ('guacamole-webapp') est le portail web front-end.
-    # C'est le SEUL service que l'étudiant final voit. Son rôle est de :
-    # 1. Gérer l'authentification (il redirigera vers Keycloak).
-    # 2. Lire les permissions depuis 'db'.
-    # 3. Afficher la liste des connexions RDP autorisées.
-    # 4. Relayer le flux RDP de 'guacd' vers le navigateur.
-    #
-    # CONNEXIONS AVEC D'AUTRES SERVICES :
-    #
-    # - 'keycloak' (Connexion sortante, via redirection) :
-    #   Quand un utilisateur arrive, ce service le redirige vers 'keycloak'
-    #   pour le login OIDC.
-    #
-    # - 'db' (Connexion sortante) :
-    #   Il se connecte à 'db' pour lire la liste des connexions RDP et les
-    #   permissions associées.
-    #
-    # - 'guacd' (Connexion sortante) :
-    #   Une fois que l'utilisateur clique sur une connexion, ce service
-    #   contacte 'guacd' pour lui ordonner de démarrer la session RDP.
-    # =======================================================================
-
-  # Définit un service (conteneur) nommé 'guacamole-webapp'
-  guacamole-webapp:
-    # Utilise l'image officielle de l'application web Guacamole
-    # DOIT correspondre à la version de guacd (1.5.3)
-    image: guacamole/guacamole:1.5.3
-    container_name: guacamole_webapp
+      KEYCLOAK_ADMIN_PASSWORD: admin
     ports:
-      # Expose le port 8080 du conteneur sur le port 8081 de la VM hôte
-      # (On utilise 8081 pour éviter le conflit avec Keycloak sur 8080)
-      # L'étudiant ira sur http://<IP-VM>:8081
-      - "8081:8080"
-    networks:
-      - services-net
-    environment:
-      # --- Connexion au moteur Guacd ---
-      # Dit au webapp où trouver le service 'guacd'
-      GUACD_HOSTNAME: guacd
-      # Dit au webapp sur quel port 'guacd' écoute (par défaut 4822)
-      GUACD_PORT: 4822
-
-      # --- Connexion à la Base de Données (PostgreSQL) ---
-      # Dit au webapp d'utiliser 'postgresql'
-      GUACAMOLE_JDBC_DRIVER: postgresql
-      # Le nom du service 'db' sur le réseau
-      POSTGRES_HOSTNAME: db
-      # Le port PostgreSQL (par défaut 5432)
-      POSTGRES_PORT: 5432
-      # La base de données spécifique que Guacamole doit utiliser
-      POSTGRES_DATABASE: guacamole_db
-      # L'utilisateur pour se connecter
-      POSTGRES_USER: guacamole_user
-      # Le mot de passe (doit correspondre à celui du service 'db')
-      POSTGRES_PASSWORD: password
+      - "8080:8080"
     depends_on:
-      # Attend que ces services soient prêts avant de démarrer
-      db:
-        condition: service_healthy # Attend que la DB soit saine
-      guacd:
-        condition: service_started # Attend juste que guacd ait démarré
+      - openldap
 
-networks:
-  services-net:
-    driver: bridge
+  ############################
+  # PostgreSQL for Guacamole
+  ############################
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: guac
+      POSTGRES_PASSWORD: guac
+      POSTGRES_DB: guacdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
- 
-# Définition des volumes pour la persistance des données
+  ############################
+  # Guacamole Daemon
+  ############################
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: guacd
+
+  ############################
+  # Guacamole WebApp
+  ############################
+  guacamole:
+    image: guacamole/guacamole:1.5.5
+    container_name: guacamole
+    environment:
+      GUACD_HOSTNAME: guacd
+      POSTGRES_HOSTNAME: postgres
+      POSTGRES_DATABASE: guacdb
+      POSTGRES_USER: guac
+      POSTGRES_PASSWORD: guac
+      EXTENSION_LIST: "auth-openid"
+    ports:
+      - "8081:8080"
+    depends_on:
+      - guacd
+      - postgres
+      - keycloak
+
+  ############################
+  # Prometheus
+  ############################
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+
+  ############################
+  # Grafana
+  ############################
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+
 volumes:
-  db-data:
-  ldap-data:
-  ldap-config:
+  postgres_data:
