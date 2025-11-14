@@ -1,0 +1,168 @@
+Project Overview
+
+This project integrates Apache Guacamole, Keycloak, and OpenLDAP within a Proxmox virtualized environment, enabling secure, centralized, and web-based remote access to virtual machines (VMs).
+The idea is to allow users to access remote desktops (RDP, SSH, etc.) through a single sign-on (SSO) system using OpenID Connect (OIDC) authentication via Keycloak, while user data and permissions are managed through OpenLDAP.
+
+The project also includes Prometheus and Grafana for monitoring and visualization.
+
+1. General Objective
+
+The main goal is to create a secure and centralized access portal for managing and connecting to virtual machines hosted on Proxmox, without exposing each VM individually.
+
+Users authenticate once through Keycloak, which verifies their identity using OpenLDAP, and then Guacamole dynamically provides access to only the machines they are allowed to use.
+
+2. Key Components
+1. Guacamole (Remote Access Gateway)
+
+An open-source clientless remote desktop gateway (no need for any client installation; just a web browser).
+
+Provides RDP, SSH, or VNC access to VMs directly from the browser.
+
+Two main parts:
+
+Guacamole WebApp Container (front-end)
+
+Guacamole Daemon Container (back-end)
+
+The Guacamole Database (Guacamole DB) stores all connection configurations, permissions, and mappings.
+
+2. Keycloak (Identity and Access Management)
+
+Manages authentication and authorization via OpenID Connect (OIDC).
+
+Integrates with OpenLDAP to fetch and synchronize users and groups.
+
+Acts as the central authentication server for all applications (Guacamole, Prometheus, Grafana, etc.).
+
+Supports federation, meaning users stored in LDAP can log in via Keycloak.
+
+3. OpenLDAP (User Directory)
+
+Centralized database storing user credentials and group information.
+
+Used by Keycloak for authentication (via LDAP federation).
+
+Also used indirectly by Guacamole to identify which users or groups can access which VMs.
+
+4. Prometheus & Grafana
+
+Prometheus collects metrics from containers and systems.
+
+Grafana visualizes these metrics, providing dashboards to monitor performance, usage, and system health.
+
+3. Workflow (Step-by-Step Explanation)
+Step 1: User Access Initiation
+
+A user opens a browser and visits the Guacamole WebApp URL (e.g., guacamole.company.com).
+
+The user is not authenticated yet.
+
+Step 2: Redirection to Keycloak (Authentication)
+
+Guacamole detects that the user isn’t logged in.
+
+It redirects the user to Keycloak’s login page using the OIDC protocol.
+
+This is called the Authorization & Authentication Request.
+
+Step 3: Authentication via Keycloak and OpenLDAP
+
+The user enters their credentials on Keycloak.
+
+Keycloak checks credentials against OpenLDAP (which stores users and groups).
+
+If valid, Keycloak creates an ID Token and Access Token (OIDC tokens) and sends them back to Guacamole.
+
+Step 4: Token Exchange and Session Creation
+
+Guacamole receives the tokens and validates them.
+
+It then uses the user and group information (embedded in the token) to:
+
+Create or update the user session in its database.
+
+Filter which VMs or connections the user can access (based on group mapping).
+
+Step 5: Display of Available Connections
+
+The Guacamole WebApp displays a dashboard listing all the connections (VMs) available for that specific user.
+
+This list comes from the Guacamole DB, filtered by the user’s groups fetched from Keycloak/LDAP.
+
+Step 6: Connection to a Virtual Machine
+
+When the user clicks on a VM:
+
+The WebApp sends a request to the Guacamole Daemon.
+
+The Daemon establishes the RDP (or SSH/VNC) session directly with the target VM.
+
+The Daemon streams the display back to the user’s browser in real time (HTML5 canvas).
+
+Step 7: Monitoring and Observability
+
+Prometheus gathers performance and usage metrics from:
+
+The Guacamole containers (CPU, memory, connections)
+
+The VMs or Keycloak
+
+Grafana visualizes these metrics for administrators to monitor the entire infrastructure.
+
+4. Admin Workflow
+
+The administrator logs into Guacamole.
+
+Configures connection profiles (RDP to VMs, SSH, etc.) and assigns them to groups.
+
+In Keycloak, users are grouped according to permissions (e.g., “Admin”, “Developers”, “Testers”).
+
+Guacamole automatically maps these groups to corresponding access rights.
+
+Administrators can also monitor usage or performance through Grafana dashboards.
+
+5. Technical Highlights
+
+Proxmox VM hosts all components in Docker containers.
+
+Security:
+
+Centralized authentication through Keycloak (OIDC).
+
+LDAP ensures consistent user management.
+
+No direct exposure of VMs — access only via Guacamole.
+
+Scalability:
+
+Adding new users only requires adding them to LDAP and Keycloak.
+
+Adding new VMs requires configuring connections in Guacamole DB.
+
+Monitoring Integration:
+
+Prometheus and Grafana provide a complete observability stack.
+
+6. Example Scenario
+
+Let’s imagine a university IT department:
+
+Each student and teacher is registered in OpenLDAP.
+
+When a student logs into the portal, they are authenticated by Keycloak using LDAP credentials.
+
+Guacamole displays only the lab VMs assigned to that student’s group.
+
+Teachers can access administrative or monitoring machines.
+
+The system admin monitors everything through Grafana.
+
+7. Summary of the Architecture
+Component	Role	Communication
+Guacamole WebApp	User interface for remote access	Talks to Keycloak (OIDC) and Guacamole Daemon
+Guacamole Daemon	Handles RDP/SSH/VNC sessions	Connects to VMs directly
+Guacamole DB	Stores connections and permissions	Accessed by WebApp
+Keycloak	Authenticates users (OIDC)	Communicates with OpenLDAP
+OpenLDAP	Stores user/group data	Federated by Keycloak
+Prometheus	Monitors containers and system	Collects metrics
+Grafana	Displays monitoring dashboards	Reads from Prometheus
