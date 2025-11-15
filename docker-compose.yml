@@ -60,7 +60,7 @@ services:
     image: guacamole/guacd:1.5.5
     container_name: guacd
 
-  ############################
+ ############################
   # Guacamole WebApp
   ############################
   guacamole:
@@ -72,13 +72,17 @@ services:
       POSTGRES_DATABASE: guacdb
       POSTGRES_USER: guac
       POSTGRES_PASSWORD: guac
-      EXTENSION_LIST: "auth-openid"
+      EXTENSIONS: "auth-sso-openid"
+      GUACAMOLE_HOME: /etc/guacamole
     ports:
       - "8081:8080"
+    volumes:
+      - /etc/guacamole:/etc/guacamole
     depends_on:
       - guacd
       - postgres
       - keycloak
+
 
   ############################
   # Prometheus
